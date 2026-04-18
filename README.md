@@ -1,132 +1,127 @@
 # Healthcare Clinical RAG
 
-Professional-grade clinical retrieval-augmented analysis system designed for production-style development with clear service boundaries, repeatable setup, and deterministic execution steps.
+![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## 1. Executive Overview
+Clinical RAG system for grounded healthcare Q&A with PHI detection, HIPAA audit logging, clinician authentication, and compliant knowledge retrieval — powered by Azure OpenAI, Azure AI Search, and Azure Text Analytics.
 
-This repository provides:
-- A FastAPI service entrypoint for API-first integration
-- Structured modules for orchestration, domain logic, and integrations
-- Test scaffolding for incremental quality assurance
-- Environment-driven configuration for local, staging, and production workflows
+## Architecture
 
-## 2. Architecture
+```
+Clinical Guidelines
+        │
+        ▼
+┌──────────────────────────┐
+│  Indexer Pipeline        │
+│  index_guidelines.py     │──► Azure AI Search (vector index)
+└──────────────────────────┘
 
-### 2.1 Logical Architecture
-
-```txt
-Client / Integrator
-      |
-      v
-FastAPI API Layer (Uvicorn)
-      |
-      +--> Application Layer (routing, orchestration)
-      +--> Domain Layer (business rules)
-      +--> Integration Layer (Azure/OpenAI/search/messaging)
-      +--> Data/State Layer (configured adapters)
+Clinician Query
+        │
+        ▼
+┌───────────────────────────────────────┐
+│  FastAPI Service (:8000)              │
+│                                       │
+│  Auth ──► validate_clinician()        │──► JWT + role verification
+│       │                               │
+│  PHIDetector ──► Azure Text Analytics │──► PII/PHI entity detection
+│       │                               │
+│  ClinicalRetriever ──► AI Search     │──► Guideline retrieval
+│       │                               │
+│  ClinicalGenerator ──► GPT-4o        │──► Grounded answer + disclaimer
+│       │                               │
+│  HIPAAAuditLogger ──► Cosmos DB      │──► HIPAA-compliant audit trail
+└───────────────────────────────────────┘
 ```
 
-### 2.2 Runtime Components
-- API Server: FastAPI + Uvicorn
-- Configuration: environment variables and .env file
-- External Integrations: enabled per environment
-- Validation: pytest + e2e demo script
+## Key Features
 
-## 3. Repository Structure
+- **PHI Detection** — Azure Text Analytics scans queries for Protected Health Information before processing
+- **HIPAA Audit Logging** — Every interaction logged to Cosmos DB with clinician context, timestamps, and PHI flags
+- **Clinician Authentication** — JWT-based auth with role validation (physician, nurse, pharmacist)
+- **Medical Disclaimer** — All responses include configurable medical disclaimers
+- **Grounded Answers** — RAG pipeline ensures responses cite specific clinical guidelines
+- **Clinical Guideline Indexing** — Structured ingestion of medical guidelines with semantic chunking
 
-```txt
+## Step-by-Step Flow
+
+### Step 1: Guideline Ingestion
+Run `indexer/index_guidelines.py` to process clinical guidelines from `indexer/guidelines/`, embed them, and index in Azure AI Search.
+
+### Step 2: Clinician Authentication
+Clinician authenticates via JWT. `validate_clinician()` verifies role and credentials.
+
+### Step 3: PHI Screening
+`PHIDetector` scans the incoming query using Azure Text Analytics to detect any PHI/PII entities. Flagged queries are logged but still processed.
+
+### Step 4: Guideline Retrieval
+`ClinicalRetriever` performs hybrid search against indexed clinical guidelines, returning relevant chunks with confidence scores.
+
+### Step 5: Answer Generation
+`ClinicalGenerator` sends retrieved context to GPT-4o with a medical system prompt. Response includes grounded citations and a medical disclaimer.
+
+### Step 6: HIPAA Audit
+`HIPAAAuditLogger` writes a `HIPAAAuditRecord` to Cosmos DB containing query, clinician context, PHI detection results, retrieved guidelines, and generated answer.
+
+## Repository Structure
+
+```
 healthcare-clinical-rag/
-  src/ or orchestrator/
-  tests/
-  infra/
-  requirements.txt
-  demo_e2e.py
+├── src/
+│   ├── main.py              # FastAPI app with lifespan management
+│   ├── retriever.py          # ClinicalRetriever — guideline search
+│   ├── generator.py          # ClinicalGenerator — grounded answer generation
+│   ├── phi_detection.py      # PHIDetector — Azure Text Analytics PII/PHI scan
+│   ├── auth.py               # Clinician JWT authentication
+│   ├── audit.py              # HIPAAAuditLogger — Cosmos DB audit trail
+│   ├── models.py             # ClinicalQuery, ClinicalResponse, HIPAAAuditRecord
+│   └── config.py             # Environment settings
+├── indexer/
+│   ├── index_guidelines.py   # Clinical guideline indexing pipeline
+│   └── guidelines/           # Sample clinical guidelines
+├── tests/
+│   ├── test_phi_detection.py
+│   └── test_retriever.py
+├── infra/
+│   ├── Dockerfile
+│   └── azure-deploy.sh
+├── demo_e2e.py
+├── requirements.txt
+└── .env.example
 ```
 
-## 4. Prerequisites
-
-- Python 3.10+
-- pip 23+
-- Git
-- Optional cloud credentials for enabled connectors
-
-## 5. Local Setup
-
-1. Clone repository
+## Quick Start
 
 ```bash
 git clone https://github.com/maneeshkumar52/healthcare-clinical-rag.git
 cd healthcare-clinical-rag
-```
-
-2. Create virtual environment
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-3. Install dependencies
-
-```bash
-pip install --upgrade pip
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-4. Configure environment
-
-```bash
-cp .env.example .env 2>/dev/null || true
-```
-
-## 6. Run the Service
-
-```bash
+cp .env.example .env   # Configure Azure credentials
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Service endpoints:
-- API docs: http://127.0.0.1:8000/docs
-- OpenAPI JSON: http://127.0.0.1:8000/openapi.json
+## Configuration
 
-## 7. Validation and Test Flow
+| Variable | Description |
+|----------|-------------|
+| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint |
+| `AZURE_OPENAI_DEPLOYMENT` | Model deployment (gpt-4o) |
+| `AZURE_SEARCH_ENDPOINT` | Azure AI Search endpoint |
+| `AZURE_SEARCH_INDEX_NAME` | Index (clinical-guidelines) |
+| `AZURE_LANGUAGE_ENDPOINT` | Azure Text Analytics for PHI detection |
+| `COSMOS_ENDPOINT` | Cosmos DB for HIPAA audit logs |
+| `COSMOS_AUDIT_CONTAINER` | Audit container (hipaa-audit) |
+| `JWT_SECRET` | JWT signing secret |
 
-1. Syntax validation
-
-```bash
-python3 -m compileall -q .
-```
-
-2. Unit/integration tests
+## Testing
 
 ```bash
 pytest -q
-```
-
-3. End-to-end demo
-
-```bash
 python demo_e2e.py
 ```
 
-## 8. Troubleshooting
+## License
 
-- Import or module errors:
-  - Ensure .venv is active
-  - Reinstall dependencies
-- Port already in use:
-  - Change --port value
-- Cloud connector failures:
-  - Validate credentials and service endpoints in .env
-
-## 9. Production Readiness Checklist
-
-- [ ] Environment variables externalized
-- [ ] Secrets not committed
-- [ ] Logging and tracing enabled
-- [ ] Test suite green in CI
-- [ ] Health checks configured in deployment
-
-## 10. License
-
-See LICENSE in this repository.
+MIT
